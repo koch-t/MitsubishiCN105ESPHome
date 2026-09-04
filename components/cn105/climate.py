@@ -87,6 +87,20 @@ CONF_KWH_SENSOR = "kwh_sensor"
 CONF_RUNTIME_HOURS_SENSOR = "runtime_hours_sensor"
 CONF_OUTSIDE_AIR_TEMPERATURE_SENSOR = "outside_air_temperature_sensor"
 CONF_TARGET_HUMIDITY_SENSOR = "target_humidity_sensor"
+CONF_REDLINK_THERMOSTAT_HUMIDITY_SENSOR = "redlink_thermostat_humidity_sensor"
+CONF_REDLINK_THERMOSTAT_BATTERY_SENSOR = "redlink_thermostat_battery_sensor"
+CONF_REDLINK_THERMOSTAT_MODEL_SENSOR = "redlink_thermostat_model_sensor"
+CONF_REDLINK_THERMOSTAT_SERIAL_SENSOR = "redlink_thermostat_serial_sensor"
+CONF_REDLINK_THERMOSTAT_FIRMWARE_SENSOR = "redlink_thermostat_firmware_sensor"
+CONF_REDLINK_THERMOSTAT_TEMPERATURE_SOURCE_SENSOR = (
+    "redlink_thermostat_temperature_source_sensor"
+)
+CONF_REDLINK_CONNECTION_SENSOR = "redlink_connection_sensor"
+CONF_REDLINK_PACKET_AGE_SENSOR = "redlink_packet_age_sensor"
+CONF_REDLINK_RX_PACKET_COUNT_SENSOR = "redlink_rx_packet_count_sensor"
+CONF_REDLINK_TX_PACKET_COUNT_SENSOR = "redlink_tx_packet_count_sensor"
+CONF_REDLINK_TIMEOUT_COUNT_SENSOR = "redlink_timeout_count_sensor"
+CONF_REDLINK_LAST_CONTROL_SOURCE_SENSOR = "redlink_last_control_source_sensor"
 CONF_ISEE_SENSOR = "isee_sensor"
 CONF_FUNCTIONS_SENSOR = "functions_sensor"
 CONF_FUNCTIONS_BUTTON = "functions_get_button"
@@ -142,6 +156,8 @@ CONF_REMOTE_TEMP_KEEPALIVE_INTERVAL = "remote_temperature_keepalive_interval"
 CONF_DEBOUNCE_DELAY = "debounce_delay"
 CONF_CONNECTION_BOOTSTRAP_DELAY = "connection_bootstrap_delay"
 CONF_INSTALLER_MODE = "installer_mode"
+CONF_REDLINK_UART_ID = "redlink_uart_id"
+CONF_USE_REDLINK_THERMOSTAT_TEMPERATURE = "use_redlink_thermostat_temperature"
 
 # DÃÂÃÂ©finitions des classes C++ (identiques ÃÂÃÂ  votre version)
 VaneOrientationSelect = cg.global_ns.class_(
@@ -161,6 +177,24 @@ OutsideAirTemperatureSensor = cg.global_ns.class_(
 ISeeSensor = cg.global_ns.class_("ISeeSensor", binary_sensor.BinarySensor, cg.Component)
 TargetHumiditySensor = cg.global_ns.class_(
     "TargetHumiditySensor", sensor.Sensor, cg.Component
+)
+RedlinkThermostatHumiditySensor = cg.global_ns.class_(
+    "RedlinkThermostatHumiditySensor", sensor.Sensor, cg.Component
+)
+RedlinkThermostatInfoSensor = cg.global_ns.class_(
+    "RedlinkThermostatInfoSensor", text_sensor.TextSensor, cg.Component
+)
+RedlinkThermostatTemperatureSourceSensor = cg.global_ns.class_(
+    "RedlinkThermostatTemperatureSourceSensor", binary_sensor.BinarySensor, cg.Component
+)
+RedlinkDiagnosticSensor = cg.global_ns.class_(
+    "RedlinkDiagnosticSensor", sensor.Sensor, cg.Component
+)
+RedlinkConnectionSensor = cg.global_ns.class_(
+    "RedlinkConnectionSensor", binary_sensor.BinarySensor, cg.Component
+)
+RedlinkControlSourceSensor = cg.global_ns.class_(
+    "RedlinkControlSourceSensor", text_sensor.TextSensor, cg.Component
 )
 StageSensor = cg.global_ns.class_("StageSensor", text_sensor.TextSensor, cg.Component)
 FunctionsSensor = cg.global_ns.class_(
@@ -285,6 +319,48 @@ TARGET_HUMIDITY_SENSOR_SCHEMA = sensor.sensor_schema(
     accuracy_decimals=0,
     entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
 ).extend({cv.GenerateID(CONF_ID): cv.declare_id(TargetHumiditySensor)})
+REDLINK_THERMOSTAT_HUMIDITY_SENSOR_SCHEMA = sensor.sensor_schema(
+    RedlinkThermostatHumiditySensor,
+    unit_of_measurement="%",
+    device_class="humidity",
+    state_class=STATE_CLASS_MEASUREMENT,
+    accuracy_decimals=0,
+).extend({cv.GenerateID(CONF_ID): cv.declare_id(RedlinkThermostatHumiditySensor)})
+REDLINK_THERMOSTAT_INFO_SENSOR_SCHEMA = text_sensor.text_sensor_schema(
+    RedlinkThermostatInfoSensor,
+    entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+).extend({cv.GenerateID(CONF_ID): cv.declare_id(RedlinkThermostatInfoSensor)})
+REDLINK_THERMOSTAT_TEMPERATURE_SOURCE_SENSOR_SCHEMA = binary_sensor.binary_sensor_schema(
+    RedlinkThermostatTemperatureSourceSensor,
+    device_class="connectivity",
+    entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    icon="mdi:thermometer-check",
+).extend(
+    {cv.GenerateID(CONF_ID): cv.declare_id(RedlinkThermostatTemperatureSourceSensor)}
+)
+REDLINK_CONNECTION_SENSOR_SCHEMA = binary_sensor.binary_sensor_schema(
+    RedlinkConnectionSensor,
+    device_class="connectivity",
+    entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+).extend({cv.GenerateID(CONF_ID): cv.declare_id(RedlinkConnectionSensor)})
+REDLINK_PACKET_AGE_SENSOR_SCHEMA = sensor.sensor_schema(
+    RedlinkDiagnosticSensor,
+    unit_of_measurement=UNIT_SECOND,
+    device_class=DEVICE_CLASS_DURATION,
+    state_class=STATE_CLASS_MEASUREMENT,
+    accuracy_decimals=0,
+    entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+).extend({cv.GenerateID(CONF_ID): cv.declare_id(RedlinkDiagnosticSensor)})
+REDLINK_COUNTER_SENSOR_SCHEMA = sensor.sensor_schema(
+    RedlinkDiagnosticSensor,
+    state_class=STATE_CLASS_TOTAL_INCREASING,
+    accuracy_decimals=0,
+    entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+).extend({cv.GenerateID(CONF_ID): cv.declare_id(RedlinkDiagnosticSensor)})
+REDLINK_CONTROL_SOURCE_SENSOR_SCHEMA = text_sensor.text_sensor_schema(
+    RedlinkControlSourceSensor,
+    entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+).extend({cv.GenerateID(CONF_ID): cv.declare_id(RedlinkControlSourceSensor)})
 FUNCTIONS_SENSOR_SCHEMA = text_sensor.text_sensor_schema(FunctionsSensor).extend(
     {cv.GenerateID(CONF_ID): cv.declare_id(FunctionsSensor)}
 )
@@ -373,6 +449,8 @@ CONFIG_SCHEMA = (
         {
             cv.GenerateID(): cv.declare_id(CN105Climate),
             cv.GenerateID(CONF_UART_ID): cv.use_id(uart.UARTComponent),
+            cv.Optional(CONF_REDLINK_UART_ID): cv.use_id(uart.UARTComponent),
+            cv.Optional(CONF_USE_REDLINK_THERMOSTAT_TEMPERATURE, default=True): cv.boolean,
             cv.Optional("baud_rate"): cv.invalid(
                 "baud_rate' option is not supported anymore. Please add a separate UART component with baud_rate configured."
             ),
@@ -394,6 +472,40 @@ CONFIG_SCHEMA = (
             ): OUTSIDE_AIR_TEMPERATURE_SENSOR_SCHEMA,
             cv.Optional(CONF_ISEE_SENSOR): ISEE_SENSOR_SCHEMA,
             cv.Optional(CONF_TARGET_HUMIDITY_SENSOR): TARGET_HUMIDITY_SENSOR_SCHEMA,
+            cv.Optional(
+                CONF_REDLINK_THERMOSTAT_HUMIDITY_SENSOR
+            ): REDLINK_THERMOSTAT_HUMIDITY_SENSOR_SCHEMA,
+            cv.Optional(
+                CONF_REDLINK_THERMOSTAT_BATTERY_SENSOR
+            ): REDLINK_THERMOSTAT_INFO_SENSOR_SCHEMA,
+            cv.Optional(
+                CONF_REDLINK_THERMOSTAT_MODEL_SENSOR
+            ): REDLINK_THERMOSTAT_INFO_SENSOR_SCHEMA,
+            cv.Optional(
+                CONF_REDLINK_THERMOSTAT_SERIAL_SENSOR
+            ): REDLINK_THERMOSTAT_INFO_SENSOR_SCHEMA,
+            cv.Optional(
+                CONF_REDLINK_THERMOSTAT_FIRMWARE_SENSOR
+            ): REDLINK_THERMOSTAT_INFO_SENSOR_SCHEMA,
+            cv.Optional(
+                CONF_REDLINK_THERMOSTAT_TEMPERATURE_SOURCE_SENSOR
+            ): REDLINK_THERMOSTAT_TEMPERATURE_SOURCE_SENSOR_SCHEMA,
+            cv.Optional(CONF_REDLINK_CONNECTION_SENSOR): REDLINK_CONNECTION_SENSOR_SCHEMA,
+            cv.Optional(
+                CONF_REDLINK_PACKET_AGE_SENSOR
+            ): REDLINK_PACKET_AGE_SENSOR_SCHEMA,
+            cv.Optional(
+                CONF_REDLINK_RX_PACKET_COUNT_SENSOR
+            ): REDLINK_COUNTER_SENSOR_SCHEMA,
+            cv.Optional(
+                CONF_REDLINK_TX_PACKET_COUNT_SENSOR
+            ): REDLINK_COUNTER_SENSOR_SCHEMA,
+            cv.Optional(
+                CONF_REDLINK_TIMEOUT_COUNT_SENSOR
+            ): REDLINK_COUNTER_SENSOR_SCHEMA,
+            cv.Optional(
+                CONF_REDLINK_LAST_CONTROL_SOURCE_SENSOR
+            ): REDLINK_CONTROL_SOURCE_SENSOR_SCHEMA,
             cv.Optional(CONF_FUNCTIONS_SENSOR): FUNCTIONS_SENSOR_SCHEMA,
             cv.Optional(CONF_FUNCTIONS_BUTTON): FUNCTIONS_BUTTON_SCHEMA,
             cv.Optional(CONF_FUNCTIONS_SET_BUTTON): FUNCTIONS_BUTTON_SCHEMA,
@@ -486,6 +598,20 @@ def to_code(config):
     cg.add(var.set_tx_rx_pins(tx_pin, rx_pin))
     uart_port_index = get_uart_port_index(CORE.config, uart_id_str_for_lookup)
     cg.add(var.set_uart_port(uart_port_index))
+
+    # Optional second UART used as the MIFH2/MHK2 RedLINK side of a
+    # frame-level CN105 bridge. Both UARTs use the same 2400 8E1 settings.
+    if CONF_REDLINK_UART_ID in config:
+        redlink_uart_var = yield cg.get_variable(config[CONF_REDLINK_UART_ID])
+        cg.add(var.set_redlink_uart(redlink_uart_var))
+        cg.add(redlink_uart_var.set_baud_rate(2400))
+        cg.add(redlink_uart_var.set_data_bits(8))
+        cg.add(redlink_uart_var.set_parity(UARTParityOptions.UART_CONFIG_PARITY_EVEN))
+        cg.add(redlink_uart_var.set_stop_bits(1))
+
+    cg.add(var.set_use_redlink_thermostat_temperature(
+        config[CONF_USE_REDLINK_THERMOSTAT_TEMPERATURE]
+    ))
 
     # Empty list means use all options from WIDEVANE_MAP (C++ is source of truth)
     horizontal_vane_options = []
@@ -643,6 +769,71 @@ def to_code(config):
             conf_item["force_update"] = False
         sensor_var = yield sensor.new_sensor(conf_item)
         cg.add(var.set_target_humidity_sensor(sensor_var))
+
+    if CONF_REDLINK_THERMOSTAT_HUMIDITY_SENSOR in config:
+        conf_item = config[CONF_REDLINK_THERMOSTAT_HUMIDITY_SENSOR]
+        if "force_update" not in conf_item:
+            conf_item["force_update"] = False
+        sensor_var = yield sensor.new_sensor(conf_item)
+        cg.add(var.set_redlink_thermostat_humidity_sensor(sensor_var))
+
+    if CONF_REDLINK_THERMOSTAT_BATTERY_SENSOR in config:
+        text_sensor_var = yield text_sensor.new_text_sensor(
+            config[CONF_REDLINK_THERMOSTAT_BATTERY_SENSOR]
+        )
+        cg.add(var.set_redlink_thermostat_battery_sensor(text_sensor_var))
+
+    if CONF_REDLINK_THERMOSTAT_MODEL_SENSOR in config:
+        text_sensor_var = yield text_sensor.new_text_sensor(
+            config[CONF_REDLINK_THERMOSTAT_MODEL_SENSOR]
+        )
+        cg.add(var.set_redlink_thermostat_model_sensor(text_sensor_var))
+
+    if CONF_REDLINK_THERMOSTAT_SERIAL_SENSOR in config:
+        text_sensor_var = yield text_sensor.new_text_sensor(
+            config[CONF_REDLINK_THERMOSTAT_SERIAL_SENSOR]
+        )
+        cg.add(var.set_redlink_thermostat_serial_sensor(text_sensor_var))
+
+    if CONF_REDLINK_THERMOSTAT_FIRMWARE_SENSOR in config:
+        text_sensor_var = yield text_sensor.new_text_sensor(
+            config[CONF_REDLINK_THERMOSTAT_FIRMWARE_SENSOR]
+        )
+        cg.add(var.set_redlink_thermostat_firmware_sensor(text_sensor_var))
+
+    if CONF_REDLINK_THERMOSTAT_TEMPERATURE_SOURCE_SENSOR in config:
+        binary_sensor_var = yield binary_sensor.new_binary_sensor(
+            config[CONF_REDLINK_THERMOSTAT_TEMPERATURE_SOURCE_SENSOR]
+        )
+        cg.add(var.set_redlink_thermostat_temperature_source_sensor(binary_sensor_var))
+
+    if CONF_REDLINK_CONNECTION_SENSOR in config:
+        binary_sensor_var = yield binary_sensor.new_binary_sensor(
+            config[CONF_REDLINK_CONNECTION_SENSOR]
+        )
+        cg.add(var.set_redlink_connection_sensor(binary_sensor_var))
+
+    if CONF_REDLINK_PACKET_AGE_SENSOR in config:
+        sensor_var = yield sensor.new_sensor(config[CONF_REDLINK_PACKET_AGE_SENSOR])
+        cg.add(var.set_redlink_packet_age_sensor(sensor_var))
+
+    if CONF_REDLINK_RX_PACKET_COUNT_SENSOR in config:
+        sensor_var = yield sensor.new_sensor(config[CONF_REDLINK_RX_PACKET_COUNT_SENSOR])
+        cg.add(var.set_redlink_rx_packet_count_sensor(sensor_var))
+
+    if CONF_REDLINK_TX_PACKET_COUNT_SENSOR in config:
+        sensor_var = yield sensor.new_sensor(config[CONF_REDLINK_TX_PACKET_COUNT_SENSOR])
+        cg.add(var.set_redlink_tx_packet_count_sensor(sensor_var))
+
+    if CONF_REDLINK_TIMEOUT_COUNT_SENSOR in config:
+        sensor_var = yield sensor.new_sensor(config[CONF_REDLINK_TIMEOUT_COUNT_SENSOR])
+        cg.add(var.set_redlink_timeout_count_sensor(sensor_var))
+
+    if CONF_REDLINK_LAST_CONTROL_SOURCE_SENSOR in config:
+        text_sensor_var = yield text_sensor.new_text_sensor(
+            config[CONF_REDLINK_LAST_CONTROL_SOURCE_SENSOR]
+        )
+        cg.add(var.set_redlink_last_control_source_sensor(text_sensor_var))
 
     if CONF_FUNCTIONS_SENSOR in config:
         tsensor_var = yield text_sensor.new_text_sensor(config[CONF_FUNCTIONS_SENSOR])

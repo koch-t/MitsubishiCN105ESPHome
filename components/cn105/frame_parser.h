@@ -84,6 +84,9 @@ public:
     /// True when a complete frame (header + payload + checksum) has been received.
     bool frame_complete() const { return frame_complete_; }
 
+    /// True after a sync byte has been seen and before the frame is complete.
+    bool in_frame() const { return found_start_ && !frame_complete_; }
+
     /// True when the received checksum matches the computed one.
     /// Only valid after frame_complete() returns true.
     bool checksum_valid() const {

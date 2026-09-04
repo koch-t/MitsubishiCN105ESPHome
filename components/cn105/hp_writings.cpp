@@ -90,6 +90,22 @@ void CN105Climate::prepareSetPacket(uint8_t* packet, int length) {
 
 void CN105Climate::writePacket(uint8_t* packet, int length, bool checkIsActive) {
 
+    // MIFH2 is another CN105 master. Never put an ESPHome packet in the
+    // middle of a RedLINK transaction or an arriving RedLINK frame.
+    if (this->redlink_bridge_busy_()) {
+        ESP_LOGD(LOG_CONN_TAG, "Deferring local packet while RedLINK owns the CN105 bus");
+        if (length > PACKET_LEN) {
+            ESP_LOGE(TAG, "Packet length %d exceeds PACKET_LEN %d, dropping.", length, PACKET_LEN);
+            return;
+        }
+        memcpy(this->pending_packet_, packet, static_cast<size_t>(length));
+        this->pending_packet_len_ = length;
+        this->pending_check_is_active_ = checkIsActive;
+        this->has_pending_packet_ = true;
+        this->set_timeout("write", 250, [this]() { this->try_write_pending_packet(); });
+        return;
+    }
+
     if ((this->isUARTReady_()) &&
         (this->isHeatpumpConnectionActive() || (!checkIsActive))) {
 
@@ -99,6 +115,15 @@ void CN105Climate::writePacket(uint8_t* packet, int length, bool checkIsActive) 
         for (int i = 0; i < length; i++) {
             this->get_hw_serial_()->write_byte((uint8_t)packet[i]);
         }
+
+        if (this->redlink_uart_ != nullptr && length > 5 && packet[1] == 0x41 &&
+            (packet[5] == 0x01 || packet[5] == 0x08 || packet[5] == 0x15)) {
+            this->record_redlink_control_source_("ESPHome/Home Assistant");
+            this->mirror_local_control_to_redlink_(packet, length);
+        }
+
+        this->local_transaction_active_ = true;
+        this->local_transaction_started_ms_ = CUSTOM_MILLIS;
 
         // Prevent sending wantedSettings too soon after writing for example the remote temperature update packet
         this->lastSend = CUSTOM_MILLIS;
@@ -121,13 +146,17 @@ void CN105Climate::writePacket(uint8_t* packet, int length, bool checkIsActive) 
 
 void CN105Climate::try_write_pending_packet() {
     if (!this->has_pending_packet_) return;
+    if (this->redlink_bridge_busy_()) {
+        this->set_timeout("write", 250, [this]() { this->try_write_pending_packet(); });
+        return;
+    }
     if (!this->isUARTReady_()) {
         this->reconnectUART();
         this->set_timeout("write", 2000, [this]() { this->try_write_pending_packet(); });
         return;
     }
-    this->writePacket(this->pending_packet_, this->pending_packet_len_, this->pending_check_is_active_);
     this->has_pending_packet_ = false;
+    this->writePacket(this->pending_packet_, this->pending_packet_len_, this->pending_check_is_active_);
 }
 
 const char* CN105Climate::getModeSetting() {

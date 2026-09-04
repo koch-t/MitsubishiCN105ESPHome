@@ -157,6 +157,88 @@ uart:
   rx_pin: GPIO16
 ```
 
+#### MHK2 / MIFH2 RedLINK bridge (ESP32)
+
+An MIFH2 receiver is a second CN105 master: the MHK2 thermostat talks to the
+receiver, and the receiver talks to the indoor unit. To keep the MHK2 and
+Home Assistant climate entity working at the same time, connect the receiver
+to a second UART and add `redlink_uart_id` to the CN105 climate component:
+
+```yaml
+uart:
+  - id: HP_UART
+    baud_rate: 2400
+    tx_pin: GPIO17
+    rx_pin: GPIO16
+  - id: REDLINK_UART
+    baud_rate: 2400
+    tx_pin: GPIO21
+    rx_pin: GPIO22
+
+climate:
+  - platform: cn105
+    id: hp
+    name: "My Heat Pump"
+    uart_id: HP_UART
+    redlink_uart_id: REDLINK_UART
+    use_redlink_thermostat_temperature: true
+    redlink_thermostat_humidity_sensor:
+      name: "MHK2 Humidity"
+    redlink_thermostat_battery_sensor:
+      name: "MHK2 Battery"
+    redlink_thermostat_model_sensor:
+      name: "MHK2 Model"
+    redlink_thermostat_serial_sensor:
+      name: "MHK2 Serial"
+    redlink_thermostat_firmware_sensor:
+      name: "MHK2 Firmware"
+    redlink_thermostat_temperature_source_sensor:
+      name: "Using MHK2 Temperature"
+    redlink_connection_sensor:
+      name: "RedLINK Connected"
+    redlink_packet_age_sensor:
+      name: "RedLINK Packet Age"
+    redlink_rx_packet_count_sensor:
+      name: "RedLINK RX Packets"
+    redlink_tx_packet_count_sensor:
+      name: "RedLINK TX Packets"
+    redlink_timeout_count_sensor:
+      name: "RedLINK Timeouts"
+    redlink_last_control_source_sensor:
+      name: "Last HVAC Control Source"
+    update_interval: 2s
+```
+
+The component arbitrates the two CN105 masters and passes complete frames
+between the indoor unit and MIFH2. The MHK2 remains the RedLINK thermostat;
+`hp` remains the ESPHome/Home Assistant climate entity. This requires an
+ESP32 with two usable UARTs. Both UARTs must be configured as 2400 baud, 8E1.
+When `use_redlink_thermostat_temperature` is enabled, the latest MHK2 room
+temperature is reported as `hp`'s current temperature; the indoor-unit sensor
+is used until an MHK2 reading arrives and whenever that reading is stale. Set
+the option to `false` to keep reporting the indoor-unit temperature.
+If configured, `redlink_thermostat_humidity_sensor` exposes the MHK2 measured
+indoor relative humidity. This is separate from `target_humidity_sensor`,
+which exposes a heat-pump humidity setpoint where supported.
+Additional optional entities expose the MHK2 battery state, model, serial,
+firmware version, and whether the MHK2 is currently supplying the active room
+temperature. Enhanced MHK2 state-upload packets also synchronize the climate
+mode and heat/cool setpoints.
+The RedLINK diagnostics report recent communication health, packet age,
+packet counters, timeout/error count, and the last control source
+(`MHK2` or `ESPHome/Home Assistant`).
+Climate setting and run-state changes made in ESPHome/Home Assistant are also
+mirrored to the MHK2 through the receiver, with the RedLINK acknowledgement
+handled independently from the indoor-unit response. Remote-temperature
+maintenance packets and read/poll requests are not mirrored as user controls.
+
+Use the MRC2 cable with the MIFH2. Route its CN105 TX and RX signal lines
+through a suitable bidirectional 5 V/3.3 V level shifter to the two
+`REDLINK_UART` GPIOs, crossing TX and RX as usual. Share signal ground and
+provide the receiver with the power specified for the MIFH2 cable. Do not
+connect the MIFH2 signal lines directly to 3.3 V GPIOs, and do not tie the
+MIFH2 and indoor-unit UART signal wires together without the ESP32 bridge.
+
 #### For ESP8266-based Devices
 
 ```yaml

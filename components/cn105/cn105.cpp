@@ -1,11 +1,36 @@
 
 #include "cn105.h"
+#include <cstdio>
+#include <ctime>
 #ifdef USE_ESP32
 #include <driver/uart.h>
 #include <driver/gpio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #endif
+
+namespace {
+
+std::string decode_redlink_6bit_string_(const uint8_t* data, size_t byte_count, size_t character_count) {
+    std::string result;
+    result.reserve(character_count);
+    for (size_t character = 0; character < character_count; character++) {
+        const size_t start_bit = character * 6;
+        if ((start_bit + 6) > (byte_count * 8)) break;
+
+        uint8_t value = 0;
+        for (size_t bit = 0; bit < 6; bit++) {
+            const size_t absolute_bit = start_bit + bit;
+            value = static_cast<uint8_t>((value << 1) |
+                ((data[absolute_bit / 8] >> (7 - (absolute_bit % 8))) & 0x01));
+        }
+        if (value <= 0x1F) value = static_cast<uint8_t>(value + 0x40);
+        result.push_back(static_cast<char>(value));
+    }
+    return result;
+}
+
+}  // namespace
 
 using namespace esphome;
 
@@ -73,6 +98,18 @@ CN105Climate::CN105Climate(uart::UARTComponent* uart) :
     this->airflow_control_select_ = nullptr;
     this->compressor_frequency_sensor_ = nullptr;
     this->target_humidity_sensor_ = nullptr;
+    this->redlink_thermostat_humidity_sensor_ = nullptr;
+    this->redlink_thermostat_battery_sensor_ = nullptr;
+    this->redlink_thermostat_model_sensor_ = nullptr;
+    this->redlink_thermostat_serial_sensor_ = nullptr;
+    this->redlink_thermostat_firmware_sensor_ = nullptr;
+    this->redlink_thermostat_temperature_source_sensor_ = nullptr;
+    this->redlink_connection_sensor_ = nullptr;
+    this->redlink_packet_age_sensor_ = nullptr;
+    this->redlink_rx_packet_count_sensor_ = nullptr;
+    this->redlink_tx_packet_count_sensor_ = nullptr;
+    this->redlink_timeout_count_sensor_ = nullptr;
+    this->redlink_last_control_source_sensor_ = nullptr;
     this->input_power_sensor_ = nullptr;
     this->kwh_sensor_ = nullptr;
     this->runtime_hours_sensor_ = nullptr;
@@ -241,6 +278,525 @@ void CN105Climate::set_tx_rx_pins(int tx_pin, int rx_pin) {
     this->rx_pin_ = rx_pin;
     ESP_LOGI(TAG, "setting tx_pin: %d rx_pin: %d", tx_pin, rx_pin);
 
+}
+
+void CN105Climate::set_redlink_uart(uart::UARTComponent* redlink_uart) {
+    this->redlink_uart_ = redlink_uart;
+    this->redlink_parser_.reset();
+    ESP_LOGI(LOG_CONN_TAG, "MIFH2 RedLINK bridge enabled on second UART");
+}
+
+bool CN105Climate::is_response_command_(uint8_t command) const {
+    return command == 0x61 || command == 0x62 || command == 0x7A || command == 0x7B;
+}
+
+bool CN105Climate::redlink_bridge_busy_() const {
+    return this->redlink_uart_ != nullptr &&
+        (this->redlink_transaction_active_ || this->has_pending_redlink_frame_ ||
+         this->redlink_local_transaction_active_ || this->has_pending_local_redlink_frame_ ||
+         this->redlink_parser_.in_frame());
+}
+
+void CN105Climate::send_frame_(uart::UARTComponent* serial, const uint8_t* frame, int length) {
+    if (serial == nullptr || frame == nullptr || length <= 0) return;
+    for (int i = 0; i < length; i++) {
+        serial->write_byte(frame[i]);
+    }
+}
+
+void CN105Climate::send_redlink_frame_(const uint8_t* frame, int length) {
+    this->send_frame_(this->redlink_uart_, frame, length);
+    this->record_redlink_tx_(CUSTOM_MILLIS);
+}
+
+void CN105Climate::set_redlink_connection_state_(bool connected) {
+    if (this->redlink_connection_state_ == connected) return;
+    this->redlink_connection_state_ = connected;
+    if (this->redlink_connection_sensor_ != nullptr) {
+        this->redlink_connection_sensor_->publish_state(connected);
+    }
+}
+
+void CN105Climate::record_redlink_control_source_(const char* source) {
+    if (this->redlink_last_control_source_sensor_ != nullptr && source != nullptr) {
+        this->redlink_last_control_source_sensor_->publish_state(source);
+    }
+}
+
+void CN105Climate::update_redlink_diagnostics_(uint32_t now, bool force) {
+    if (this->redlink_connection_state_ && this->redlink_last_packet_ms_ != 0 &&
+        now - this->redlink_last_packet_ms_ > 120000) {
+        this->set_redlink_connection_state_(false);
+    }
+
+    if (!force && this->redlink_last_diagnostics_ms_ != 0 &&
+        now - this->redlink_last_diagnostics_ms_ < 5000) {
+        return;
+    }
+    this->redlink_last_diagnostics_ms_ = now;
+
+    if (this->redlink_packet_age_sensor_ != nullptr && this->redlink_last_packet_ms_ != 0) {
+        this->redlink_packet_age_sensor_->publish_state(
+            static_cast<float>(now - this->redlink_last_packet_ms_) / 1000.0f);
+    }
+    if (this->redlink_rx_packet_count_sensor_ != nullptr) {
+        this->redlink_rx_packet_count_sensor_->publish_state(
+            static_cast<float>(this->redlink_rx_packet_count_));
+    }
+    if (this->redlink_tx_packet_count_sensor_ != nullptr) {
+        this->redlink_tx_packet_count_sensor_->publish_state(
+            static_cast<float>(this->redlink_tx_packet_count_));
+    }
+    if (this->redlink_timeout_count_sensor_ != nullptr) {
+        this->redlink_timeout_count_sensor_->publish_state(
+            static_cast<float>(this->redlink_timeout_count_));
+    }
+}
+
+void CN105Climate::record_redlink_rx_(uint32_t now) {
+    this->redlink_last_packet_ms_ = now;
+    this->redlink_rx_packet_count_++;
+    this->set_redlink_connection_state_(true);
+    this->update_redlink_diagnostics_(now, true);
+}
+
+void CN105Climate::record_redlink_tx_(uint32_t now) {
+    this->redlink_tx_packet_count_++;
+    this->update_redlink_diagnostics_(now, true);
+}
+
+bool CN105Climate::handle_redlink_state_query_(const uint8_t* frame, int length) {
+    if (frame == nullptr || length < 6 || frame[1] != 0x42 ||
+        (frame[5] != 0xA9 && frame[5] != 0xAB)) {
+        return false;
+    }
+
+    // GET_RESPONSE with a 16-byte payload. The thermostat state-download
+    // response carries auto mode, heat setpoint, and cool setpoint.
+    uint8_t response[22] = {
+        0xFC, 0x62, 0x01, 0x30, 0x10,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    };
+    response[5] = frame[5];
+
+    if (frame[5] == 0xA9) {
+        time_t now = std::time(nullptr);
+        if (now < 1704067200) now = 1704067200;  // 2024-01-01 fallback
+        const uint32_t timestamp = static_cast<uint32_t>(now);
+        response[6] = static_cast<uint8_t>((timestamp >> 24) & 0xFF);
+        response[7] = static_cast<uint8_t>((timestamp >> 16) & 0xFF);
+        response[8] = static_cast<uint8_t>((timestamp >> 8) & 0xFF);
+        response[9] = static_cast<uint8_t>(timestamp & 0xFF);
+        response[11] = (this->mode == climate::CLIMATE_MODE_AUTO ||
+                        this->mode == climate::CLIMATE_MODE_HEAT_COOL) ? 0x01 : 0x00;
+
+        float heat = NAN;
+        float cool = NAN;
+        if (this->traits_.has_feature_flags(climate::CLIMATE_REQUIRES_TWO_POINT_TARGET_TEMPERATURE)) {
+            heat = this->getTargetTemperatureLow();
+            cool = this->getTargetTemperatureHigh();
+        } else if (this->mode == climate::CLIMATE_MODE_COOL) {
+            cool = this->getTargetTemperature();
+        } else {
+            heat = this->getTargetTemperature();
+        }
+        if (std::isfinite(heat)) response[12] = cn105_protocol::encode_temperature_b(heat);
+        if (std::isfinite(cool)) response[13] = cn105_protocol::encode_temperature_b(cool);
+
+        // Matches the enhanced thermostat response format used by MHK2.
+        response[15] = 0x07;
+    } else {
+        // Thermostat AB query response: command 0xAB, payload byte 1 = 1.
+        response[6] = 0x01;
+    }
+
+    response[21] = cn105_protocol::checksum(response, 21);
+    this->send_redlink_frame_(response, sizeof(response));
+    ESP_LOGD(LOG_CONN_TAG, "Answered RedLINK state query 0x%02X locally", frame[5]);
+    return true;
+}
+
+void CN105Climate::queue_redlink_frame_(const uint8_t* frame, int length) {
+    if (length <= 0 || length > MAX_DATA_BYTES) return;
+    if (this->has_pending_redlink_frame_) {
+        ESP_LOGW(LOG_CONN_TAG, "Dropping RedLINK frame: bridge queue is full");
+        return;
+    }
+    memcpy(this->pending_redlink_frame_, frame, static_cast<size_t>(length));
+    this->pending_redlink_frame_len_ = length;
+    this->has_pending_redlink_frame_ = true;
+}
+
+void CN105Climate::queue_local_redlink_frame_(const uint8_t* frame, int length) {
+    if (frame == nullptr || length <= 0 || length > MAX_DATA_BYTES) return;
+    if (this->has_pending_local_redlink_frame_) {
+        ESP_LOGW(LOG_CONN_TAG, "Dropping local RedLINK control: bridge queue is full");
+        return;
+    }
+    memcpy(this->pending_local_redlink_frame_, frame, static_cast<size_t>(length));
+    this->pending_local_redlink_frame_len_ = length;
+    this->has_pending_local_redlink_frame_ = true;
+}
+
+void CN105Climate::mirror_local_control_to_redlink_(const uint8_t* frame, int length) {
+    if (this->redlink_uart_ == nullptr || frame == nullptr || length < 6 ||
+        frame[1] != 0x41 ||
+        (frame[5] != 0x01 && frame[5] != 0x08 && frame[5] != 0x15)) {
+        return;
+    }
+
+    // The same valid CN105 SET packet is understood by the RedLINK receiver
+    // and keeps the MHK2's displayed settings aligned with ESPHome. Do not
+    // mirror 0x07: that packet is the thermostat-to-heat-pump room sensor
+    // update, not a user HVAC setting.
+    if (this->redlink_local_transaction_active_ || this->redlink_transaction_active_ ||
+        this->has_pending_redlink_frame_ || this->redlink_parser_.in_frame() ||
+        this->local_transaction_active_) {
+        this->queue_local_redlink_frame_(frame, length);
+        return;
+    }
+
+    this->send_redlink_frame_(frame, length);
+    this->redlink_local_transaction_active_ = true;
+    this->redlink_local_transaction_started_ms_ = CUSTOM_MILLIS;
+    ESP_LOGD(LOG_CONN_TAG, "Mirrored ESPHome control packet 0x%02X to RedLINK", frame[5]);
+}
+
+void CN105Climate::flush_local_redlink_frame_() {
+    if (!this->has_pending_local_redlink_frame_ || this->redlink_uart_ == nullptr ||
+        this->redlink_local_transaction_active_ || this->redlink_transaction_active_ ||
+        this->has_pending_redlink_frame_ || this->local_transaction_active_ ||
+        this->redlink_parser_.in_frame()) {
+        return;
+    }
+
+    this->send_redlink_frame_(this->pending_local_redlink_frame_, this->pending_local_redlink_frame_len_);
+    this->redlink_local_transaction_active_ = true;
+    this->redlink_local_transaction_started_ms_ = CUSTOM_MILLIS;
+    this->has_pending_local_redlink_frame_ = false;
+    ESP_LOGD(LOG_CONN_TAG, "Mirrored queued ESPHome control to RedLINK");
+}
+
+void CN105Climate::capture_redlink_thermostat_temperature_(const uint8_t* frame, int length) {
+    // MHK2 reports its selected room sensor as the standard CN105 remote
+    // temperature SET command: 0x41 / payload 0x07. The enhanced byte is
+    // preferred; older receivers may provide only the legacy byte.
+    if (!this->use_redlink_thermostat_temperature_ || frame == nullptr || length < 10 ||
+        frame[1] != 0x41 || frame[5] != 0x07) {
+        return;
+    }
+
+    if (frame[6] == 0x00 || frame[8] == 0x80) {
+        this->set_redlink_thermostat_source_active_(false);
+        this->redlink_thermostat_temperature_ = NAN;
+        this->redlink_thermostat_temperature_ms_ = 0;
+        if (!std::isnan(this->currentStatus.roomTemperature)) {
+            this->setCurrentTemperature(this->currentStatus.roomTemperature);
+            this->publish_state();
+        }
+        ESP_LOGI(LOG_CONN_TAG, "MHK2 selected internal heat-pump temperature");
+        return;
+    }
+
+    float temperature = NAN;
+    if (frame[8] != 0x00) {
+        temperature = (static_cast<float>(frame[8]) - 128.0f) / 2.0f;
+    } else {
+        temperature = (static_cast<float>(frame[7]) + 16.0f) / 2.0f;
+    }
+
+    if (std::isfinite(temperature) && temperature >= -64.0f && temperature <= 63.5f) {
+        this->set_redlink_thermostat_source_active_(true);
+        this->redlink_thermostat_temperature_ = temperature;
+        this->redlink_thermostat_temperature_ms_ = CUSTOM_MILLIS;
+        this->setCurrentTemperature(temperature);
+        this->publish_state();
+        ESP_LOGD(LOG_CONN_TAG, "MHK2 thermostat temperature: %.1f C", temperature);
+    }
+}
+
+void CN105Climate::set_redlink_thermostat_source_active_(bool active) {
+    if (this->redlink_thermostat_source_active_ == active) return;
+    this->redlink_thermostat_source_active_ = active;
+    if (this->redlink_thermostat_temperature_source_sensor_ != nullptr) {
+        this->redlink_thermostat_temperature_source_sensor_->publish_state(active);
+    }
+}
+
+void CN105Climate::capture_redlink_thermostat_humidity_(const uint8_t* frame, int length) {
+    // MHK2 enhanced thermostat sensor status: 0x41 / payload command 0xA6.
+    // The ITP packet definition places indoor RH at payload byte 5, which is
+    // byte 10 in the complete CN105 frame.
+    if (this->redlink_thermostat_humidity_sensor_ == nullptr || frame == nullptr || length < 22 ||
+        frame[1] != 0x41 || frame[4] < 16 || frame[5] != 0xA6) {
+        return;
+    }
+
+    const uint8_t humidity = frame[10];
+    if (humidity <= 100) {
+        this->redlink_thermostat_humidity_sensor_->publish_state(static_cast<float>(humidity));
+        ESP_LOGD(LOG_CONN_TAG, "MHK2 thermostat humidity: %u%%", humidity);
+    } else {
+        ESP_LOGW(LOG_CONN_TAG, "Ignoring invalid MHK2 humidity: %u%%", humidity);
+    }
+}
+
+void CN105Climate::capture_redlink_thermostat_status_(const uint8_t* frame, int length) {
+    if (frame == nullptr || length < 22 || frame[1] != 0x41 ||
+        frame[4] < 16 || frame[5] != 0xA6 || this->redlink_thermostat_battery_sensor_ == nullptr) {
+        return;
+    }
+
+    const char* battery_state = nullptr;
+    switch (frame[11]) {
+        case 0x00: battery_state = "OK"; break;
+        case 0x01: battery_state = "Low"; break;
+        case 0x02: battery_state = "Critical"; break;
+        case 0x03: battery_state = "Replace"; break;
+        default: battery_state = "Unknown"; break;
+    }
+    this->redlink_thermostat_battery_sensor_->publish_state(battery_state);
+}
+
+void CN105Climate::capture_redlink_thermostat_hello_(const uint8_t* frame, int length) {
+    if (frame == nullptr || length < 22 || frame[1] != 0x41 ||
+        frame[4] < 16 || frame[5] != 0xA7) {
+        return;
+    }
+
+    if (this->redlink_thermostat_model_sensor_ != nullptr) {
+        this->redlink_thermostat_model_sensor_->publish_state(
+            decode_redlink_6bit_string_(&frame[6], 4, 4));
+    }
+    if (this->redlink_thermostat_serial_sensor_ != nullptr) {
+        this->redlink_thermostat_serial_sensor_->publish_state(
+            decode_redlink_6bit_string_(&frame[9], 12, 12));
+    }
+    if (this->redlink_thermostat_firmware_sensor_ != nullptr) {
+        char version[16];
+        snprintf(version, sizeof(version), "%02u.%02u.%02u", frame[18], frame[19], frame[20]);
+        this->redlink_thermostat_firmware_sensor_->publish_state(version);
+    }
+}
+
+void CN105Climate::process_redlink_thermostat_state_upload_(const uint8_t* frame, int length) {
+    if (frame == nullptr || length < 22 || frame[1] != 0x41 ||
+        frame[4] < 16 || frame[5] != 0xA8) {
+        return;
+    }
+
+    const uint8_t flags = frame[6];
+    bool climate_changed = false;
+
+    if ((flags & 0x04) != 0 && frame[12] != 0) {
+        const climate::ClimateMode new_mode =
+            this->traits_.has_feature_flags(climate::CLIMATE_REQUIRES_TWO_POINT_TARGET_TEMPERATURE)
+                ? climate::CLIMATE_MODE_HEAT_COOL
+                : climate::CLIMATE_MODE_AUTO;
+        if (this->mode != new_mode) {
+            this->mode = new_mode;
+            climate_changed = true;
+        }
+    }
+
+    const bool has_heat = (flags & 0x08) != 0 && frame[13] != 0x00 && frame[13] != 0xFF;
+    const bool has_cool = (flags & 0x10) != 0 && frame[14] != 0x00 && frame[14] != 0xFF;
+    const float heat = has_heat ? (static_cast<float>(frame[13]) - 128.0f) / 2.0f : NAN;
+    const float cool = has_cool ? (static_cast<float>(frame[14]) - 128.0f) / 2.0f : NAN;
+
+    if (this->traits_.has_feature_flags(climate::CLIMATE_REQUIRES_TWO_POINT_TARGET_TEMPERATURE)) {
+        if (has_heat) {
+            this->setTargetTemperatureLow(heat);
+            climate_changed = true;
+        }
+        if (has_cool) {
+            this->setTargetTemperatureHigh(cool);
+            climate_changed = true;
+        }
+    } else if (has_heat || has_cool) {
+        const float target = this->mode == climate::CLIMATE_MODE_COOL && has_cool ? cool :
+            (has_heat ? heat : cool);
+        this->setTargetTemperature(target);
+        climate_changed = true;
+    }
+
+    if (climate_changed) {
+        this->publish_state();
+    }
+}
+
+bool CN105Climate::redlink_thermostat_temperature_is_fresh_() const {
+    return this->use_redlink_thermostat_temperature_ &&
+        !std::isnan(this->redlink_thermostat_temperature_) &&
+        this->redlink_thermostat_temperature_ms_ != 0 &&
+        (CUSTOM_MILLIS - this->redlink_thermostat_temperature_ms_ < 120000);
+}
+
+float CN105Climate::preferred_current_temperature_() const {
+    return this->redlink_thermostat_temperature_is_fresh_()
+        ? this->redlink_thermostat_temperature_
+        : this->currentStatus.roomTemperature;
+}
+
+void CN105Climate::flush_redlink_frame_() {
+    if (!this->has_pending_redlink_frame_ || this->redlink_uart_ == nullptr ||
+        this->redlink_transaction_active_ || this->redlink_local_transaction_active_ ||
+        this->local_transaction_active_ ||
+        this->redlink_parser_.in_frame() || !this->isUARTReady_()) {
+        return;
+    }
+
+    this->send_frame_(this->parent_, this->pending_redlink_frame_, this->pending_redlink_frame_len_);
+    this->lastSend = CUSTOM_MILLIS;
+    this->redlink_transaction_active_ = true;
+    this->redlink_transaction_started_ms_ = CUSTOM_MILLIS;
+    this->has_pending_redlink_frame_ = false;
+    ESP_LOGD(LOG_CONN_TAG, "Forwarded queued RedLINK frame to heat pump");
+}
+
+void CN105Climate::service_redlink_bridge_() {
+    if (this->redlink_uart_ == nullptr) return;
+
+    const uint32_t now = CUSTOM_MILLIS;
+
+    // At 2400 baud a normal CN105 frame is short, but a disconnected/corrupt
+    // wire must not leave the arbitrator locked forever.
+    if (this->redlink_parser_.in_frame() &&
+        now - this->redlink_last_byte_ms_ > 300) {
+        ESP_LOGW(LOG_CONN_TAG, "Resetting incomplete RedLINK frame after timeout");
+        this->redlink_parser_.reset();
+        this->redlink_timeout_count_++;
+        this->update_redlink_diagnostics_(now, true);
+    }
+    if (this->redlink_transaction_active_ &&
+        now - this->redlink_transaction_started_ms_ > 2500) {
+        ESP_LOGW(LOG_CONN_TAG, "RedLINK request timed out; releasing CN105 bus");
+        this->redlink_transaction_active_ = false;
+        this->redlink_timeout_count_++;
+        this->set_redlink_connection_state_(false);
+        this->update_redlink_diagnostics_(now, true);
+    }
+    if (this->redlink_local_transaction_active_ &&
+        now - this->redlink_local_transaction_started_ms_ > 2500) {
+        ESP_LOGW(LOG_CONN_TAG, "Mirrored RedLINK control timed out; releasing bridge bus");
+        this->redlink_local_transaction_active_ = false;
+        this->redlink_timeout_count_++;
+        this->set_redlink_connection_state_(false);
+        this->update_redlink_diagnostics_(now, true);
+    }
+    if (this->local_transaction_active_ &&
+        now - this->local_transaction_started_ms_ > 2500) {
+        ESP_LOGW(LOG_CONN_TAG, "Local CN105 request timed out; releasing bridge bus");
+        this->local_transaction_active_ = false;
+    }
+    if (this->redlink_thermostat_source_active_ &&
+        !this->redlink_thermostat_temperature_is_fresh_()) {
+        this->set_redlink_thermostat_source_active_(false);
+        this->redlink_thermostat_temperature_ = NAN;
+        if (!std::isnan(this->currentStatus.roomTemperature)) {
+            this->setCurrentTemperature(this->currentStatus.roomTemperature);
+            this->publish_state();
+        }
+    }
+
+    while (this->redlink_uart_->available()) {
+        uint8_t byte = 0;
+        if (!this->redlink_uart_->read_byte(&byte)) continue;
+        this->redlink_last_byte_ms_ = CUSTOM_MILLIS;
+        this->redlink_parser_.feed(byte);
+
+        if (!this->redlink_parser_.frame_complete()) continue;
+
+        const int length = this->redlink_parser_.frame_size();
+        uint8_t frame[MAX_DATA_BYTES] = {};
+        memcpy(frame, this->redlink_parser_.raw(), static_cast<size_t>(length));
+        const bool valid = this->redlink_parser_.checksum_valid();
+        this->redlink_parser_.reset();
+
+        if (!valid) {
+            ESP_LOGW(LOG_CONN_TAG, "Dropping invalid frame from RedLINK receiver");
+            this->redlink_timeout_count_++;
+            this->update_redlink_diagnostics_(CUSTOM_MILLIS, true);
+            continue;
+        }
+
+        this->record_redlink_rx_(CUSTOM_MILLIS);
+
+        // A locally mirrored SET is acknowledged by the receiver on this
+        // UART. Consume that acknowledgement here; it must not be routed to
+        // the indoor unit as though it belonged to a thermostat request.
+        if (this->redlink_local_transaction_active_ &&
+            this->is_response_command_(frame[1])) {
+            this->redlink_local_transaction_active_ = false;
+            ESP_LOGD(LOG_CONN_TAG, "RedLINK acknowledged mirrored ESPHome control");
+            continue;
+        }
+
+        if (frame[1] == 0x41 &&
+            (frame[5] == 0x01 || frame[5] == 0x07 || frame[5] == 0x08 ||
+             frame[5] == 0x15 || frame[5] == 0xA8 || frame[5] == 0xAA)) {
+            this->record_redlink_control_source_("MHK2");
+        }
+        this->capture_redlink_thermostat_temperature_(frame, length);
+        this->capture_redlink_thermostat_humidity_(frame, length);
+        this->capture_redlink_thermostat_status_(frame, length);
+        this->capture_redlink_thermostat_hello_(frame, length);
+        this->process_redlink_thermostat_state_upload_(frame, length);
+
+        if (this->handle_redlink_state_query_(frame, length)) {
+            continue;
+        }
+
+        // Enhanced MHK2 packets are thermostat-local. Acknowledge them here;
+        // forwarding them to the heat pump can leave the RedLINK side waiting
+        // because older CN105 heat pumps do not understand 0xA6-0xAA.
+        if (length >= 6 && frame[1] == 0x41 &&
+            (frame[5] == 0xA6 || frame[5] == 0xA7 || frame[5] == 0xA8 || frame[5] == 0xAA)) {
+            static const uint8_t set_response[] = {
+                0xFC, 0x61, 0x01, 0x30, 0x10,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5E,
+            };
+            this->send_redlink_frame_(set_response, sizeof(set_response));
+            ESP_LOGD(LOG_CONN_TAG, "Acknowledged enhanced MHK2 thermostat packet 0x%02X", frame[5]);
+            continue;
+        }
+
+        if (this->redlink_transaction_active_ || this->redlink_local_transaction_active_ ||
+            this->local_transaction_active_ ||
+            !this->isUARTReady_()) {
+            this->queue_redlink_frame_(frame, length);
+        } else {
+            this->send_frame_(this->parent_, frame, length);
+            this->lastSend = CUSTOM_MILLIS;
+            this->redlink_transaction_active_ = true;
+            this->redlink_transaction_started_ms_ = CUSTOM_MILLIS;
+            ESP_LOGD(LOG_CONN_TAG, "Forwarded RedLINK frame to heat pump");
+        }
+    }
+
+    this->update_redlink_diagnostics_(CUSTOM_MILLIS);
+    this->flush_redlink_frame_();
+    this->flush_local_redlink_frame_();
+}
+
+bool CN105Climate::forward_heatpump_frame_to_redlink_() {
+    if (this->redlink_uart_ == nullptr || !this->parser_.checksum_valid()) return false;
+
+    const bool is_peer_response = this->redlink_transaction_active_ &&
+        this->is_response_command_(this->parser_.command());
+    if (is_peer_response) {
+        this->send_redlink_frame_(this->parser_.raw(), this->parser_.frame_size());
+        this->redlink_transaction_active_ = false;
+        ESP_LOGD(LOG_CONN_TAG, "Forwarded heat-pump response to RedLINK receiver");
+        return true;
+    }
+
+    if (this->is_response_command_(this->parser_.command())) {
+        this->local_transaction_active_ = false;
+    }
+    return false;
 }
 
 void CN105Climate::pingExternalTemperature() {

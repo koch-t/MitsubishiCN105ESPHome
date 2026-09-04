@@ -8,6 +8,7 @@
 #include "uptime_connection_sensor.h"
 #include "compressor_frequency_sensor.h"
 #include "target_humidity_sensor.h"
+#include "redlink_thermostat_humidity_sensor.h"
 #include "input_power_sensor.h"
 #include "kwh_sensor.h"
 #include "runtime_hours_sensor.h"
@@ -74,6 +75,51 @@ namespace esphome {
         void set_airflow_control_select(VaneOrientationSelect* airflow_control_select);
         void set_compressor_frequency_sensor(esphome::sensor::Sensor* compressor_frequency_sensor);
         void set_target_humidity_sensor(esphome::sensor::Sensor* target_humidity_sensor);
+        void set_redlink_thermostat_humidity_sensor(esphome::sensor::Sensor* sensor) {
+            this->redlink_thermostat_humidity_sensor_ = sensor;
+        }
+        void set_redlink_thermostat_battery_sensor(text_sensor::TextSensor* sensor) {
+            this->redlink_thermostat_battery_sensor_ = sensor;
+        }
+        void set_redlink_thermostat_model_sensor(text_sensor::TextSensor* sensor) {
+            this->redlink_thermostat_model_sensor_ = sensor;
+        }
+        void set_redlink_thermostat_serial_sensor(text_sensor::TextSensor* sensor) {
+            this->redlink_thermostat_serial_sensor_ = sensor;
+        }
+        void set_redlink_thermostat_firmware_sensor(text_sensor::TextSensor* sensor) {
+            this->redlink_thermostat_firmware_sensor_ = sensor;
+        }
+        void set_redlink_thermostat_temperature_source_sensor(binary_sensor::BinarySensor* sensor) {
+            this->redlink_thermostat_temperature_source_sensor_ = sensor;
+            if (sensor != nullptr) sensor->publish_state(this->redlink_thermostat_source_active_);
+        }
+        void set_redlink_connection_sensor(binary_sensor::BinarySensor* sensor) {
+            this->redlink_connection_sensor_ = sensor;
+            if (sensor != nullptr) sensor->publish_state(this->redlink_connection_state_);
+        }
+        void set_redlink_packet_age_sensor(sensor::Sensor* sensor) {
+            this->redlink_packet_age_sensor_ = sensor;
+            if (sensor != nullptr && this->redlink_last_packet_ms_ != 0) {
+                sensor->publish_state(
+                    static_cast<float>(CUSTOM_MILLIS - this->redlink_last_packet_ms_) / 1000.0f);
+            }
+        }
+        void set_redlink_rx_packet_count_sensor(sensor::Sensor* sensor) {
+            this->redlink_rx_packet_count_sensor_ = sensor;
+            if (sensor != nullptr) sensor->publish_state(static_cast<float>(this->redlink_rx_packet_count_));
+        }
+        void set_redlink_tx_packet_count_sensor(sensor::Sensor* sensor) {
+            this->redlink_tx_packet_count_sensor_ = sensor;
+            if (sensor != nullptr) sensor->publish_state(static_cast<float>(this->redlink_tx_packet_count_));
+        }
+        void set_redlink_timeout_count_sensor(sensor::Sensor* sensor) {
+            this->redlink_timeout_count_sensor_ = sensor;
+            if (sensor != nullptr) sensor->publish_state(static_cast<float>(this->redlink_timeout_count_));
+        }
+        void set_redlink_last_control_source_sensor(text_sensor::TextSensor* sensor) {
+            this->redlink_last_control_source_sensor_ = sensor;
+        }
         void set_input_power_sensor(esphome::sensor::Sensor* input_power_sensor);
         void set_kwh_sensor(esphome::sensor::Sensor* kwh_sensor);
         void set_runtime_hours_sensor(esphome::sensor::Sensor* runtime_hours_sensor);
@@ -155,6 +201,26 @@ namespace esphome {
             nullptr;  // Sensor to store compressor frequency
         sensor::Sensor* target_humidity_sensor_ =
             nullptr;  // Sensor to expose target humidity from 0x02 settings packet (byte 12)
+        sensor::Sensor* redlink_thermostat_humidity_sensor_ =
+            nullptr;  // Sensor to expose measured MHK2 indoor RH from RedLINK
+        text_sensor::TextSensor* redlink_thermostat_battery_sensor_ = nullptr;
+        text_sensor::TextSensor* redlink_thermostat_model_sensor_ = nullptr;
+        text_sensor::TextSensor* redlink_thermostat_serial_sensor_ = nullptr;
+        text_sensor::TextSensor* redlink_thermostat_firmware_sensor_ = nullptr;
+        binary_sensor::BinarySensor* redlink_thermostat_temperature_source_sensor_ = nullptr;
+        bool redlink_thermostat_source_active_ = false;
+        binary_sensor::BinarySensor* redlink_connection_sensor_ = nullptr;
+        sensor::Sensor* redlink_packet_age_sensor_ = nullptr;
+        sensor::Sensor* redlink_rx_packet_count_sensor_ = nullptr;
+        sensor::Sensor* redlink_tx_packet_count_sensor_ = nullptr;
+        sensor::Sensor* redlink_timeout_count_sensor_ = nullptr;
+        text_sensor::TextSensor* redlink_last_control_source_sensor_ = nullptr;
+        uint32_t redlink_last_packet_ms_ = 0;
+        uint32_t redlink_last_diagnostics_ms_ = 0;
+        uint32_t redlink_rx_packet_count_ = 0;
+        uint32_t redlink_tx_packet_count_ = 0;
+        uint32_t redlink_timeout_count_ = 0;
+        bool redlink_connection_state_ = false;
         sensor::Sensor* input_power_sensor_ =
             nullptr;  // Sensor to store compressor frequency
         sensor::Sensor* kwh_sensor_ =
@@ -199,6 +265,16 @@ namespace esphome {
         void set_baud_rate(int baud_rate);
         void set_tx_rx_pins(int tx_pin, int rx_pin);
         void set_uart_port(int uart_port) { this->uart_port_ = uart_port; }
+
+        // Optional second CN105 UART for an MIFH2/MHK2 RedLINK receiver.
+        void set_redlink_uart(uart::UARTComponent* redlink_uart);
+        void set_use_redlink_thermostat_temperature(bool enabled) {
+            this->use_redlink_thermostat_temperature_ = enabled;
+            if (!enabled && !std::isnan(this->currentStatus.roomTemperature)) {
+                this->setCurrentTemperature(this->currentStatus.roomTemperature);
+                this->publish_state();
+            }
+        }
         //void set_wifi_connected_state(bool state);
         void setupUART();
         void disconnectUART();
@@ -345,6 +421,32 @@ namespace esphome {
 
         bool processInput(void);
         void processDataPacket();
+        void processDataPacket(bool from_redlink);
+        void service_redlink_bridge_();
+        bool forward_heatpump_frame_to_redlink_();
+        bool redlink_bridge_busy_() const;
+        bool is_response_command_(uint8_t command) const;
+        void send_frame_(uart::UARTComponent* uart, const uint8_t* frame, int length);
+        void queue_redlink_frame_(const uint8_t* frame, int length);
+        void flush_redlink_frame_();
+        void queue_local_redlink_frame_(const uint8_t* frame, int length);
+        void flush_local_redlink_frame_();
+        void mirror_local_control_to_redlink_(const uint8_t* frame, int length);
+        void capture_redlink_thermostat_temperature_(const uint8_t* frame, int length);
+        void capture_redlink_thermostat_humidity_(const uint8_t* frame, int length);
+        void capture_redlink_thermostat_status_(const uint8_t* frame, int length);
+        void capture_redlink_thermostat_hello_(const uint8_t* frame, int length);
+        void process_redlink_thermostat_state_upload_(const uint8_t* frame, int length);
+        void set_redlink_thermostat_source_active_(bool active);
+        void set_redlink_connection_state_(bool connected);
+        void update_redlink_diagnostics_(uint32_t now, bool force = false);
+        void record_redlink_rx_(uint32_t now);
+        void record_redlink_tx_(uint32_t now);
+        void record_redlink_control_source_(const char* source);
+        bool handle_redlink_state_query_(const uint8_t* frame, int length);
+        void send_redlink_frame_(const uint8_t* frame, int length);
+        bool redlink_thermostat_temperature_is_fresh_() const;
+        float preferred_current_temperature_() const;
         void getErrorInfoFromResponsePacket();
     void getDataFromResponsePacket();
         void getAutoModeStateFromResponsePacket(); //NET added
@@ -382,6 +484,25 @@ namespace esphome {
     private:
         void force_low_level_uart_reinit();
         int uart_port_ = -1;
+        uart::UARTComponent* redlink_uart_ = nullptr;
+        cn105_protocol::FrameParser redlink_parser_;
+        uint8_t pending_redlink_frame_[MAX_DATA_BYTES] = {};
+        int pending_redlink_frame_len_ = 0;
+        bool has_pending_redlink_frame_ = false;
+        bool redlink_transaction_active_ = false;
+        uint32_t redlink_transaction_started_ms_ = 0;
+        uint8_t pending_local_redlink_frame_[MAX_DATA_BYTES] = {};
+        int pending_local_redlink_frame_len_ = 0;
+        bool has_pending_local_redlink_frame_ = false;
+        bool redlink_local_transaction_active_ = false;
+        uint32_t redlink_local_transaction_started_ms_ = 0;
+        uint32_t redlink_last_byte_ms_ = 0;
+        bool processing_redlink_frame_ = false;
+        bool local_transaction_active_ = false;
+        uint32_t local_transaction_started_ms_ = 0;
+        bool use_redlink_thermostat_temperature_ = true;
+        float redlink_thermostat_temperature_ = NAN;
+        uint32_t redlink_thermostat_temperature_ms_ = 0;
         const char* lookupByteMapValue(const char* valuesMap[], const uint8_t byteMap[], int len, uint8_t byteValue, const char* debugInfo = "", const char* defaultValue = nullptr);
         int lookupByteMapValue(const int valuesMap[], const uint8_t byteMap[], int len, uint8_t byteValue, const char* debugInfo = "");
         int lookupByteMapIndex(const char* valuesMap[], int len, const char* lookupValue, const char* debugInfo = "");

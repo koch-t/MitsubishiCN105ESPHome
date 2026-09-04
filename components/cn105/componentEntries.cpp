@@ -60,11 +60,22 @@ void CN105Climate::loop() {
     // Bootstrap connection CN105 (UART + CONNECT) from loop()
     this->maybe_start_connection_();
 
+    // MIFH2 is another CN105 master. Give frames arriving from it first
+    // access to the heat-pump side of the bridge.
+    this->service_redlink_bridge_();
+
     // As long as the connection is not successful, we do not launch ANY cycle/write (otherwise it short-circuits the delay).
     // We still continue to read/process the input in order to detect 0x7A/0x7B (connection success).
     const bool can_talk_to_hp = this->isHeatpumpConnected();
 
     if (!this->processInput()) {                                            // if we don't get any input: no read op
+        // Do not start an ESPHome request while the RedLINK request/response
+        // transaction is in flight (or while a frame is still arriving).
+        if (this->redlink_transaction_active_ || this->redlink_local_transaction_active_ ||
+            this->has_pending_redlink_frame_ || this->has_pending_local_redlink_frame_ ||
+            this->redlink_parser_.in_frame()) {
+            return;
+        }
         if (!can_talk_to_hp) {
             return;
         }

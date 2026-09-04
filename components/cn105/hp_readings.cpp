@@ -20,7 +20,10 @@ bool CN105Climate::processInput(void) {
             ESP_LOGV("Decoder", "--> %02X", inputData);
             this->parser_.feed(inputData);
             if (this->parser_.frame_complete()) {
-                this->processDataPacket();
+                // Forward only responses belonging to a RedLINK request. A
+                // local ESPHome poll remains invisible to the receiver.
+                const bool from_redlink = this->forward_heatpump_frame_to_redlink_();
+                this->processDataPacket(from_redlink);
                 this->parser_.reset();
             }
         }
@@ -33,6 +36,13 @@ bool CN105Climate::processInput(void) {
  * Validates checksum, sets the data pointer, and dispatches to processCommand().
  */
 void CN105Climate::processDataPacket() {
+
+    this->processDataPacket(false);
+}
+
+void CN105Climate::processDataPacket(bool from_redlink) {
+
+    this->processing_redlink_frame_ = from_redlink;
 
     ESP_LOGV(TAG, "processing data packet...");
 
@@ -64,6 +74,8 @@ void CN105Climate::processDataPacket() {
             this->hpPacketDebug(this->parser_.raw(), this->parser_.frame_size(), LOG_CONN_TAG);
         }
     }
+
+    this->processing_redlink_frame_ = false;
 }
 
 
@@ -448,17 +460,21 @@ void CN105Climate::getDataFromResponsePacket() {
 
     // D'abord, laissons l'orchestrateur traiter les codes connus
     const uint8_t code = this->data[0];
-    if (this->scheduler_.process_response(code)) {
+    if (!this->processing_redlink_frame_ && this->scheduler_.process_response(code)) {
         return;
     }
     // Sinon, switch pour les cas non gÃÂ©rÃÂ©s par l'orchestrateur
     switch (code) {
 
+    case 0x02:
+        this->getSettingsFromResponsePacket();
+        break;
+    case 0x03:
+        this->getRoomTemperatureFromResponsePacket();
+        break;
     case 0x04:
-        // Handled by orchestrator (r_error_info onResponse → getErrorInfoFromResponsePacket)
-        // Reaching here means the scheduler did not intercept this response — unexpected
-        ESP_LOGW("Decoder", "[0x04] reached switch fallback — should have been handled by orchestrator");
-        break; // orchestrator
+        this->getErrorInfoFromResponsePacket();
+        break;
 
     case 0x05:
         /* timer packet */
@@ -467,9 +483,11 @@ void CN105Climate::getDataFromResponsePacket() {
         break;
 
     case 0x06:
-        break; // orchestrator
+        this->getOperatingAndCompressorFreqFromResponsePacket();
+        break;
     case 0x09:
-        break; // orchestrator
+        this->getPowerFromResponsePacket();
+        break;
 
     case 0x10:
         ESP_LOGD("Decoder", "[0x10 is Unknown : not implemented]");
@@ -477,11 +495,22 @@ void CN105Climate::getDataFromResponsePacket() {
         break;
 
     case 0x20: // fallthrough
+        if (this->parser_.data_length() >= 16) {
+            this->functions.setData1(&this->data[1]);
+            ESP_LOGD(LOG_FUNCTIONS_TAG, "Got RedLINK function settings part 1");
+        }
+        break;
     case 0x22:
-        break; // orchestrator
+        if (this->parser_.data_length() >= 16) {
+            this->functions.setData2(&this->data[1]);
+            this->functionsArrived();
+            ESP_LOGD(LOG_FUNCTIONS_TAG, "Got RedLINK function settings part 2");
+        }
+        break;
 
     case 0x42:
-        break; // orchestrator
+        this->getHVACOptionsFromResponsePacket();
+        break;
 
     default:
         ESP_LOGW("Decoder", "packet type [%02X] <-- unknown and unexpected", data[0]);
@@ -541,7 +570,10 @@ void CN105Climate::statusChanged(heatpumpStatus status) {
         this->currentStatus.runtimeHours = status.runtimeHours;
         this->currentStatus.roomTemperature = status.roomTemperature;
         this->currentStatus.outsideAirTemperature = status.outsideAirTemperature;
-        this->setCurrentTemperature(this->currentStatus.roomTemperature);
+        // If MHK2 is configured as the active temperature source, prefer its
+        // most recent thermostat reading while it remains fresh. Keep the
+        // indoor-unit value in currentStatus as the fallback/diagnostic value.
+        this->setCurrentTemperature(this->preferred_current_temperature_());
 
         this->updateAction();       // update action info on HA climate component
         this->publish_state();
@@ -565,7 +597,19 @@ void CN105Climate::statusChanged(heatpumpStatus status) {
         if (this->outside_air_temperature_sensor_ != nullptr) {
             this->outside_air_temperature_sensor_->publish_state(this->fahrenheitSupport_.normalizeHeatpumpTemperatureToUiTemperature(currentStatus.outsideAirTemperature));
         }
-    } // else no change
+    } else {
+        // A stale MHK2 reading must eventually fall back even if the indoor
+        // unit reports an otherwise unchanged status packet.
+        const float preferred = this->preferred_current_temperature_();
+        if (!std::isnan(preferred)) {
+            const float preferred_ui = this->fahrenheitSupport_.normalizeHeatpumpTemperatureToUiTemperature(preferred);
+            if (std::isnan(this->current_temperature) ||
+                std::abs(this->current_temperature - preferred_ui) > 0.01f) {
+                this->setCurrentTemperature(preferred);
+                this->publish_state();
+            }
+        }
+    }
 }
 
 
