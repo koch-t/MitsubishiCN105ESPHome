@@ -30,7 +30,7 @@ void CN105Climate::set_vertical_vane_select(
         this->setVaneSetting(setting);
         this->wantedSettings.hasChanged = true;
         this->wantedSettings.hasBeenSent = false;
-        this->wantedSettings.lastChange = CUSTOM_MILLIS;
+        this->wantedSettings.lastChange = esphome::millis();
         });
 
 }
@@ -66,7 +66,7 @@ void CN105Climate::set_horizontal_vane_select(
         this->setWideVaneSetting(setting);
         this->wantedSettings.hasChanged = true;
         this->wantedSettings.hasBeenSent = false;
-        this->wantedSettings.lastChange = CUSTOM_MILLIS;
+        this->wantedSettings.lastChange = esphome::millis();
         });
 
 }
@@ -86,7 +86,7 @@ void CN105Climate::set_airflow_control_select(
             this->setAirflowControlSetting(setting);
             this->wantedRunStates.hasChanged = true;
             this->wantedRunStates.hasBeenSent = false;
-            this->wantedRunStates.lastChange = CUSTOM_MILLIS;
+            this->wantedRunStates.lastChange = esphome::millis();
         } else {
             this->airflow_control_select_->publish_state(this->currentRunStates.airflow_control);
         }
@@ -202,7 +202,7 @@ void CN105Climate::set_air_purifier_switch(HVACOptionSwitch* Switch) {
 
         this->wantedRunStates.hasChanged = true;
         this->wantedRunStates.hasBeenSent = false;
-        this->wantedRunStates.lastChange = CUSTOM_MILLIS;
+        this->wantedRunStates.lastChange = esphome::millis();
         });
 }
 
@@ -213,7 +213,7 @@ void CN105Climate::set_night_mode_switch(HVACOptionSwitch* Switch) {
 
         this->wantedRunStates.hasChanged = true;
         this->wantedRunStates.hasBeenSent = false;
-        this->wantedRunStates.lastChange = CUSTOM_MILLIS;
+        this->wantedRunStates.lastChange = esphome::millis();
         });
 }
 
@@ -224,7 +224,7 @@ void CN105Climate::set_circulator_switch(HVACOptionSwitch* Switch) { // only in 
 
         this->wantedRunStates.hasChanged = true;
         this->wantedRunStates.hasBeenSent = false;
-        this->wantedRunStates.lastChange = CUSTOM_MILLIS;
+        this->wantedRunStates.lastChange = esphome::millis();
         });
 }
 

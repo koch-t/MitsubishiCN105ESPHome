@@ -62,7 +62,7 @@ void CN105Climate::processDataPacket(bool from_redlink) {
     if (this->parser_.checksum_valid()) {
         ESP_LOGD("chkSum", "OK");
         // checkpoint of a heatpump response
-        this->lastResponseMs = CUSTOM_MILLIS;
+        this->lastResponseMs = esphome::millis();
 
         // processing the specific command
         processCommand();
@@ -546,7 +546,7 @@ void CN105Climate::processCommand() {
         // isHeatpumpConnected_ replaced by FSM transition in setHeatpumpConnected()
         this->setHeatpumpConnected(true);
         // let's say that the last complete cycle was over now
-        this->loopCycle.lastCompleteCycleMs = CUSTOM_MILLIS;
+        this->loopCycle.lastCompleteCycleMs = esphome::millis();
         this->currentSettings.resetSettings();      // each time we connect, we need to reset current setting to force a complete sync with ha component state and receievdSettings
         this->currentRunStates.resetSettings();
         break;
@@ -897,13 +897,13 @@ bool CN105Climate::hasPendingUserTemperature() const {
 bool CN105Climate::isWithinPostSendGrace() const {
     if (!this->wantedSettings.hasBeenSent) return false;
     uint32_t graceMs = this->update_interval_ + DEFER_SCHEDULE_UPDATE_LOOP_DELAY;
-    return (CUSTOM_MILLIS - this->wantedSettings.lastChange) < graceMs;
+    return (esphome::millis() - this->wantedSettings.lastChange) < graceMs;
 }
 
 bool CN105Climate::disagreesWithLastUserSetpoint(float incoming) const {
     if (this->wantedSettings.last_user_temperature <= 0) return false;
     if (this->wantedSettings.last_user_temperature_ms == 0) return false;
-    uint32_t elapsed = CUSTOM_MILLIS - this->wantedSettings.last_user_temperature_ms;
+    uint32_t elapsed = esphome::millis() - this->wantedSettings.last_user_temperature_ms;
     if (elapsed >= RECEIVED_SETPOINT_GRACE_WINDOW_MS) return false;
     float diff = std::abs(incoming - this->wantedSettings.last_user_temperature);
     return diff > 0.5f;
@@ -934,7 +934,7 @@ bool CN105Climate::shouldApplyIncomingSetpoint(const heatpumpSettings& settings)
 bool CN105Climate::shouldIgnoreIncomingVane(const heatpumpSettings& settings) const {
     if (this->wantedSettings.last_user_vane == nullptr) return false;
     if (this->wantedSettings.last_user_vane_ms == 0) return false;
-    uint32_t elapsed = CUSTOM_MILLIS - this->wantedSettings.last_user_vane_ms;
+    uint32_t elapsed = esphome::millis() - this->wantedSettings.last_user_vane_ms;
     if (elapsed >= RECEIVED_SETPOINT_GRACE_WINDOW_MS) return false;
     if (settings.vane == nullptr) return false;
     if (strcmp(settings.vane, this->wantedSettings.last_user_vane) == 0) return false;

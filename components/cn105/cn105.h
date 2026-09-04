@@ -102,7 +102,7 @@ namespace esphome {
             this->redlink_packet_age_sensor_ = sensor;
             if (sensor != nullptr && this->redlink_last_packet_ms_ != 0) {
                 sensor->publish_state(
-                    static_cast<float>(CUSTOM_MILLIS - this->redlink_last_packet_ms_) / 1000.0f);
+                    static_cast<float>(esphome::millis() - this->redlink_last_packet_ms_) / 1000.0f);
             }
         }
         void set_redlink_rx_packet_count_sensor(sensor::Sensor* sensor) {

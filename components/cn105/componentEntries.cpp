@@ -14,7 +14,7 @@ using namespace esphome;
 void CN105Climate::setup() {
 
     ESP_LOGD(TAG, "Component initialization: setup call");
-    this->boot_ms_ = CUSTOM_MILLIS;
+    this->boot_ms_ = esphome::millis();
     this->current_temperature = NAN;
     this->target_temperature = NAN;
     this->target_temperature_low = NAN;
@@ -22,7 +22,7 @@ void CN105Climate::setup() {
     this->fan_mode = climate::CLIMATE_FAN_OFF;
     this->swing_mode = climate::CLIMATE_SWING_OFF;
     this->parser_.reset();
-    this->lastResponseMs = CUSTOM_MILLIS;
+    this->lastResponseMs = esphome::millis();
 
     // initialize diagnostic stats
     this->nbCompleteCycles_ = 0;
@@ -146,7 +146,7 @@ void CN105Climate::maybe_start_connection_() {
         }
 
         case DriverState::WAIT_GRACE: {
-            const uint32_t elapsed = CUSTOM_MILLIS - this->boot_ms_;
+            const uint32_t elapsed = esphome::millis() - this->boot_ms_;
             if (elapsed < this->conn_bootstrap_delay_ms_) {
                 return;  // grace delay not elapsed yet
             }

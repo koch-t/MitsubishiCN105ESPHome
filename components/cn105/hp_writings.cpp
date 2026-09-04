@@ -10,7 +10,7 @@ uint8_t CN105Climate::checkSum(uint8_t bytes[], int len) {
 
 void CN105Climate::sendFirstConnectionPacket() {
     if (this->isUARTReady_()) {
-        this->lastReconnectTimeMs = CUSTOM_MILLIS;          // marker to prevent to many reconnections
+        this->lastReconnectTimeMs = esphome::millis();          // marker to prevent to many reconnections
         this->setHeatpumpConnected(false);
         uint8_t packet[CONNECT_LEN];
         memcpy(packet, CONNECT, CONNECT_LEN);
@@ -27,8 +27,8 @@ void CN105Climate::sendFirstConnectionPacket() {
 
         this->writePacket(packet, CONNECT_LEN, false);      // checkIsActive=false because it's the first packet and we don't have any reply yet
 
-        this->lastSend = CUSTOM_MILLIS;
-        this->lastConnectRqTimeMs = CUSTOM_MILLIS;
+        this->lastSend = esphome::millis();
+        this->lastConnectRqTimeMs = esphome::millis();
         this->nbHeatpumpConnections_++;
 
         // we wait for a 10s timeout to check if the hp has replied to connection packet
@@ -50,7 +50,7 @@ void CN105Climate::sendFirstConnectionPacket() {
         ESP_LOGE(LOG_CONN_TAG, "UART doesn't seem to be connected...");
         this->setupUART();
         // this delay to prevent a logging flood should never happen
-        CUSTOM_DELAY(750);
+        esphome::delay(750);
     }
 }
 
@@ -123,10 +123,10 @@ void CN105Climate::writePacket(uint8_t* packet, int length, bool checkIsActive) 
         }
 
         this->local_transaction_active_ = true;
-        this->local_transaction_started_ms_ = CUSTOM_MILLIS;
+        this->local_transaction_started_ms_ = esphome::millis();
 
         // Prevent sending wantedSettings too soon after writing for example the remote temperature update packet
-        this->lastSend = CUSTOM_MILLIS;
+        this->lastSend = esphome::millis();
 
     } else {
         ESP_LOGW(TAG, "could not write as asked, because UART is not connected");
@@ -414,7 +414,7 @@ void CN105Climate::publishWantedRunStatesStateToHA() {
 
 void CN105Climate::sendWantedSettingsDelegate() {
     this->wantedSettings.hasBeenSent = true;
-    this->lastSend = CUSTOM_MILLIS;
+    this->lastSend = esphome::millis();
     ESP_LOGI(TAG, "sending wantedSettings..");
     this->debugSettings("wantedSettings", wantedSettings);
     // and then we send the update packet
@@ -441,7 +441,7 @@ void CN105Climate::sendWantedSettingsDelegate() {
 */
 void CN105Climate::sendWantedSettings() {
     if (this->isHeatpumpConnectionActive() && this->isUARTReady_()) {
-        if (CUSTOM_MILLIS - this->lastSend > 300) {        // we don't want to send too many packets
+        if (esphome::millis() - this->lastSend > 300) {        // we don't want to send too many packets
 
             //this->cycleEnded();   // only if we let the cycle be interrupted to send wented settings
 
@@ -529,7 +529,7 @@ void CN105Climate::sendRemoteTemperaturePacket() {
 
     // Debounce logic: avoid flooding the bus with identical temperature values
     // Only skip if: same temperature AND sent recently (within half of keep-alive interval, min 5s)
-    uint32_t now = CUSTOM_MILLIS;
+    uint32_t now = esphome::millis();
     uint32_t min_interval = this->remote_temp_keepalive_interval_ms_ > 0
         ? std::max(this->remote_temp_keepalive_interval_ms_ / 2, (uint32_t)5000)
         : 5000;  // Default 5s if keep-alive disabled

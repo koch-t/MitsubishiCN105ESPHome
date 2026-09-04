@@ -16,7 +16,7 @@ void CN105Climate::checkPendingWantedSettings() {
         return;
     }
 
-    long now = CUSTOM_MILLIS;
+    long now = esphome::millis();
     if (!(this->wantedSettings.hasChanged) || (now - this->wantedSettings.lastChange < this->debounce_delay_)) {
         return;
     }
@@ -36,7 +36,7 @@ void CN105Climate::checkPendingWantedRunStates() {
         return;
     }
 
-    long now = CUSTOM_MILLIS;
+    long now = esphome::millis();
     if (!(this->wantedRunStates.hasChanged) || (now - this->wantedRunStates.lastChange < this->debounce_delay_)) {
         return;
     }
@@ -100,14 +100,14 @@ void CN105Climate::handleDualSetpointBoth(float low, float high) {
     this->setTargetTemperatureLow(low);
     this->setTargetTemperatureHigh(high);
     this->last_dual_setpoint_side_ = 'N';
-    this->last_dual_setpoint_change_ms_ = CUSTOM_MILLIS;
+    this->last_dual_setpoint_change_ms_ = esphome::millis();
     this->currentSettings.dual_low_target = this->getTargetTemperatureLow();
     this->currentSettings.dual_high_target = this->getTargetTemperatureHigh();
 }
 
 void CN105Climate::handleDualSetpointLowOnly(float low) {
     ESP_LOGD("control", "handleDualSetpointLowOnly - LOW: %.1f", low);
-    if (this->last_dual_setpoint_side_ == 'H' && (CUSTOM_MILLIS - this->last_dual_setpoint_change_ms_) < UI_SETPOINT_ANTIREBOUND_MS) {
+    if (this->last_dual_setpoint_side_ == 'H' && (esphome::millis() - this->last_dual_setpoint_change_ms_) < UI_SETPOINT_ANTIREBOUND_MS) {
         ESP_LOGD("control", "IGNORED low setpoint due to UI anti-rebound after high change");
         return;
     }
@@ -122,14 +122,14 @@ void CN105Climate::handleDualSetpointLowOnly(float low) {
         ESP_LOGD("control", "mode auto: sliding high to preserve amplitude %.1f => [%.1f - %.1f]", amplitude, this->getTargetTemperatureLow(), this->getTargetTemperatureHigh());
     }
     this->last_dual_setpoint_side_ = 'L';
-    this->last_dual_setpoint_change_ms_ = CUSTOM_MILLIS;
+    this->last_dual_setpoint_change_ms_ = esphome::millis();
     this->currentSettings.dual_low_target = this->getTargetTemperatureLow();
     this->currentSettings.dual_high_target = this->getTargetTemperatureHigh();
 }
 
 void CN105Climate::handleDualSetpointHighOnly(float high) {
     ESP_LOGI("control", "HIGH: handleDualSetpointHighOnly - HIGH : %.1f", high);
-    if (this->last_dual_setpoint_side_ == 'L' && (CUSTOM_MILLIS - this->last_dual_setpoint_change_ms_) < UI_SETPOINT_ANTIREBOUND_MS) {
+    if (this->last_dual_setpoint_side_ == 'L' && (esphome::millis() - this->last_dual_setpoint_change_ms_) < UI_SETPOINT_ANTIREBOUND_MS) {
         ESP_LOGD("control", "ignored high setpoint due to UI anti-rebound after low change");
         return;
     }
@@ -144,7 +144,7 @@ void CN105Climate::handleDualSetpointHighOnly(float high) {
         ESP_LOGD("control", "mode auto: sliding low to preserve amplitude %.1f => [%.1f - %.1f]", amplitude, this->getTargetTemperatureLow(), this->getTargetTemperatureHigh());
     }
     this->last_dual_setpoint_side_ = 'H';
-    this->last_dual_setpoint_change_ms_ = CUSTOM_MILLIS;
+    this->last_dual_setpoint_change_ms_ = esphome::millis();
     this->currentSettings.dual_low_target = this->getTargetTemperatureLow();
     this->currentSettings.dual_high_target = this->getTargetTemperatureHigh();
 }
@@ -156,7 +156,7 @@ void CN105Climate::handleSingleTargetInAutoOrDry(float requested) {
         this->setTargetTemperatureLow(requested - half_span);
         this->setTargetTemperatureHigh(requested + half_span);
         this->last_dual_setpoint_side_ = 'N';
-        this->last_dual_setpoint_change_ms_ = CUSTOM_MILLIS;
+        this->last_dual_setpoint_change_ms_ = esphome::millis();
         this->currentSettings.dual_low_target = this->getTargetTemperatureLow();
         this->currentSettings.dual_high_target = this->getTargetTemperatureHigh();
         this->setTargetTemperature(requested);
@@ -168,7 +168,7 @@ void CN105Climate::handleSingleTargetInAutoOrDry(float requested) {
             this->setTargetTemperatureLow(requested);
         }
         this->last_dual_setpoint_side_ = 'H';
-        this->last_dual_setpoint_change_ms_ = CUSTOM_MILLIS;
+        this->last_dual_setpoint_change_ms_ = esphome::millis();
         this->currentSettings.dual_low_target = this->getTargetTemperatureLow();
         this->currentSettings.dual_high_target = this->getTargetTemperatureHigh();
         this->setTargetTemperature(requested);
@@ -265,7 +265,7 @@ void CN105Climate::finalizeControlIfUpdated(bool updated) {
     logCheckWantedSettingsMutex(this->wantedSettings);
     this->wantedSettings.hasChanged = true;
     this->wantedSettings.hasBeenSent = false;
-    this->wantedSettings.lastChange = CUSTOM_MILLIS;
+    this->wantedSettings.lastChange = esphome::millis();
     this->debugSettings("control (wantedSettings)", this->wantedSettings);
     this->publish_state();
 }
@@ -475,7 +475,7 @@ void CN105Climate::controlTemperature() {
     // Track last user temperature command: this persists across resetSettings()
     // so we can apply a grace window before accepting PAC-reported setpoints.
     this->wantedSettings.last_user_temperature = setting;
-    this->wantedSettings.last_user_temperature_ms = CUSTOM_MILLIS;
+    this->wantedSettings.last_user_temperature_ms = esphome::millis();
     ESP_LOGI("control", "setting wanted temperature to %.1f (tracked as last_user_temperature)", setting);
 }
 
@@ -709,7 +709,7 @@ void CN105Climate::setVaneSetting(const char* setting) {
         // Track last user vane command: this persists across resetSettings()
         // so subsequent SET packets include the vane control bits.
         wantedSettings.last_user_vane = VANE_MAP[index];
-        wantedSettings.last_user_vane_ms = CUSTOM_MILLIS;
+        wantedSettings.last_user_vane_ms = esphome::millis();
         ESP_LOGD("control", "Tracked last_user_vane: %s", wantedSettings.last_user_vane);
     } else {
         wantedSettings.vane = VANE_MAP[0];

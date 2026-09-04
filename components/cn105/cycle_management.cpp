@@ -18,7 +18,7 @@ bool cycleManagement::isCycleRunning() {
 
 void cycleManagement::init() {
     cycleRunning = false;
-    lastCompleteCycleMs = CUSTOM_MILLIS;
+    lastCompleteCycleMs = esphome::millis();
 }
 
 void cycleManagement::deferCycle() {
@@ -32,21 +32,21 @@ void cycleManagement::deferCycle() {
     //ESP_LOGI(LOG_CYCLE_TAG, "Defering cycle trigger of %lu ms", delay);
     log_info_uint32(LOG_CYCLE_TAG, "Defering cycle trigger of  ", delay, " ms");
     // forces the lastCompleteCycle offset of delay ms to allow a longer rest time
-    lastCompleteCycleMs = CUSTOM_MILLIS + delay;
+    lastCompleteCycleMs = esphome::millis() + delay;
 
 }
 void cycleManagement::cycleStarted() {
     ESP_LOGI(LOG_CYCLE_TAG, "1: Cycle start");
-    lastCycleStartMs = CUSTOM_MILLIS;
+    lastCycleStartMs = esphome::millis();
     cycleRunning = true;
 }
 
 void cycleManagement::cycleEnded(bool timedOut) {
     cycleRunning = false;
 
-    if (lastCompleteCycleMs < CUSTOM_MILLIS) {    // we check this because of defering mecanism
+    if (lastCompleteCycleMs < esphome::millis()) {    // we check this because of defering mecanism
         // a complete cycle is done
-        lastCompleteCycleMs = CUSTOM_MILLIS;      // to prevent next inteval from ticking too soon
+        lastCompleteCycleMs = esphome::millis();      // to prevent next inteval from ticking too soon
     }
 
     ESP_LOGI(LOG_CYCLE_TAG, "6: Cycle ended in %.1f seconds (with timeout?: %s)",
@@ -55,11 +55,11 @@ void cycleManagement::cycleEnded(bool timedOut) {
 }
 
 bool cycleManagement::hasUpdateIntervalPassed(unsigned int update_interval) {
-    if (CUSTOM_MILLIS < lastCompleteCycleMs) return false;      // must be checked because operands are they are unsigned
-    return (CUSTOM_MILLIS - lastCompleteCycleMs) > update_interval;
+    if (esphome::millis() < lastCompleteCycleMs) return false;      // must be checked because operands are they are unsigned
+    return (esphome::millis() - lastCompleteCycleMs) > update_interval;
 }
 
 bool cycleManagement::doesCycleTimeOut(unsigned int update_interval) {
-    if (CUSTOM_MILLIS < lastCycleStartMs) return false;         // must be checked because operands are they are unsigned
-    return (CUSTOM_MILLIS - lastCycleStartMs) > (2 * update_interval) + 1000;
+    if (esphome::millis() < lastCycleStartMs) return false;         // must be checked because operands are they are unsigned
+    return (esphome::millis() - lastCycleStartMs) > (2 * update_interval) + 1000;
 }

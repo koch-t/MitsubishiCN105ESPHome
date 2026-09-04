@@ -306,7 +306,7 @@ void CN105Climate::send_frame_(uart::UARTComponent* serial, const uint8_t* frame
 
 void CN105Climate::send_redlink_frame_(const uint8_t* frame, int length) {
     this->send_frame_(this->redlink_uart_, frame, length);
-    this->record_redlink_tx_(CUSTOM_MILLIS);
+    this->record_redlink_tx_(esphome::millis());
 }
 
 void CN105Climate::set_redlink_connection_state_(bool connected) {
@@ -459,7 +459,7 @@ void CN105Climate::mirror_local_control_to_redlink_(const uint8_t* frame, int le
 
     this->send_redlink_frame_(frame, length);
     this->redlink_local_transaction_active_ = true;
-    this->redlink_local_transaction_started_ms_ = CUSTOM_MILLIS;
+    this->redlink_local_transaction_started_ms_ = esphome::millis();
     ESP_LOGD(LOG_CONN_TAG, "Mirrored ESPHome control packet 0x%02X to RedLINK", frame[5]);
 }
 
@@ -473,7 +473,7 @@ void CN105Climate::flush_local_redlink_frame_() {
 
     this->send_redlink_frame_(this->pending_local_redlink_frame_, this->pending_local_redlink_frame_len_);
     this->redlink_local_transaction_active_ = true;
-    this->redlink_local_transaction_started_ms_ = CUSTOM_MILLIS;
+    this->redlink_local_transaction_started_ms_ = esphome::millis();
     this->has_pending_local_redlink_frame_ = false;
     ESP_LOGD(LOG_CONN_TAG, "Mirrored queued ESPHome control to RedLINK");
 }
@@ -509,7 +509,7 @@ void CN105Climate::capture_redlink_thermostat_temperature_(const uint8_t* frame,
     if (std::isfinite(temperature) && temperature >= -64.0f && temperature <= 63.5f) {
         this->set_redlink_thermostat_source_active_(true);
         this->redlink_thermostat_temperature_ = temperature;
-        this->redlink_thermostat_temperature_ms_ = CUSTOM_MILLIS;
+        this->redlink_thermostat_temperature_ms_ = esphome::millis();
         this->setCurrentTemperature(temperature);
         this->publish_state();
         ESP_LOGD(LOG_CONN_TAG, "MHK2 thermostat temperature: %.1f C", temperature);
@@ -630,7 +630,7 @@ bool CN105Climate::redlink_thermostat_temperature_is_fresh_() const {
     return this->use_redlink_thermostat_temperature_ &&
         !std::isnan(this->redlink_thermostat_temperature_) &&
         this->redlink_thermostat_temperature_ms_ != 0 &&
-        (CUSTOM_MILLIS - this->redlink_thermostat_temperature_ms_ < 120000);
+        (esphome::millis() - this->redlink_thermostat_temperature_ms_ < 120000);
 }
 
 float CN105Climate::preferred_current_temperature_() const {
@@ -648,9 +648,9 @@ void CN105Climate::flush_redlink_frame_() {
     }
 
     this->send_frame_(this->parent_, this->pending_redlink_frame_, this->pending_redlink_frame_len_);
-    this->lastSend = CUSTOM_MILLIS;
+    this->lastSend = esphome::millis();
     this->redlink_transaction_active_ = true;
-    this->redlink_transaction_started_ms_ = CUSTOM_MILLIS;
+    this->redlink_transaction_started_ms_ = esphome::millis();
     this->has_pending_redlink_frame_ = false;
     ESP_LOGD(LOG_CONN_TAG, "Forwarded queued RedLINK frame to heat pump");
 }
@@ -658,7 +658,7 @@ void CN105Climate::flush_redlink_frame_() {
 void CN105Climate::service_redlink_bridge_() {
     if (this->redlink_uart_ == nullptr) return;
 
-    const uint32_t now = CUSTOM_MILLIS;
+    const uint32_t now = esphome::millis();
 
     // At 2400 baud a normal CN105 frame is short, but a disconnected/corrupt
     // wire must not leave the arbitrator locked forever.
@@ -703,7 +703,7 @@ void CN105Climate::service_redlink_bridge_() {
     while (this->redlink_uart_->available()) {
         uint8_t byte = 0;
         if (!this->redlink_uart_->read_byte(&byte)) continue;
-        this->redlink_last_byte_ms_ = CUSTOM_MILLIS;
+        this->redlink_last_byte_ms_ = esphome::millis();
         this->redlink_parser_.feed(byte);
 
         if (!this->redlink_parser_.frame_complete()) continue;
@@ -717,11 +717,11 @@ void CN105Climate::service_redlink_bridge_() {
         if (!valid) {
             ESP_LOGW(LOG_CONN_TAG, "Dropping invalid frame from RedLINK receiver");
             this->redlink_timeout_count_++;
-            this->update_redlink_diagnostics_(CUSTOM_MILLIS, true);
+            this->update_redlink_diagnostics_(esphome::millis(), true);
             continue;
         }
 
-        this->record_redlink_rx_(CUSTOM_MILLIS);
+        this->record_redlink_rx_(esphome::millis());
 
         // A locally mirrored SET is acknowledged by the receiver on this
         // UART. Consume that acknowledgement here; it must not be routed to
@@ -769,14 +769,14 @@ void CN105Climate::service_redlink_bridge_() {
             this->queue_redlink_frame_(frame, length);
         } else {
             this->send_frame_(this->parent_, frame, length);
-            this->lastSend = CUSTOM_MILLIS;
+            this->lastSend = esphome::millis();
             this->redlink_transaction_active_ = true;
-            this->redlink_transaction_started_ms_ = CUSTOM_MILLIS;
+            this->redlink_transaction_started_ms_ = esphome::millis();
             ESP_LOGD(LOG_CONN_TAG, "Forwarded RedLINK frame to heat pump");
         }
     }
 
-    this->update_redlink_diagnostics_(CUSTOM_MILLIS);
+    this->update_redlink_diagnostics_(esphome::millis());
     this->flush_redlink_frame_();
     this->flush_local_redlink_frame_();
 }
@@ -959,7 +959,7 @@ void CN105Climate::disconnectUART() {
 
 void CN105Climate::reconnectUART() {
     ESP_LOGD(TAG, "reconnectUART()");
-    this->lastReconnectTimeMs = CUSTOM_MILLIS;
+    this->lastReconnectTimeMs = esphome::millis();
     this->disconnectUART();
     // Disabled: Low-level UART fallback (ESP-IDF 5.4.x) can interfere with the
     // handshake/fallback tests. We let UARTComponent generate the standard reset.
@@ -971,16 +971,16 @@ void CN105Climate::reconnectUART() {
 
 void CN105Climate::reconnectIfConnectionLost() {
 
-    long reconnectTimeMs = CUSTOM_MILLIS - this->lastReconnectTimeMs;
+    long reconnectTimeMs = esphome::millis() - this->lastReconnectTimeMs;
 
     if (reconnectTimeMs < this->update_interval_) {
         return;
     }
 
     if (!this->isHeatpumpConnectionActive()) {
-        long connectTimeMs = CUSTOM_MILLIS - this->lastConnectRqTimeMs;
+        long connectTimeMs = esphome::millis() - this->lastConnectRqTimeMs;
         if (connectTimeMs > this->update_interval_) {
-            long lrTimeMs = CUSTOM_MILLIS - this->lastResponseMs;
+            long lrTimeMs = esphome::millis() - this->lastResponseMs;
             ESP_LOGW(TAG, "Heatpump has not replied for %ld s", lrTimeMs / 1000);
             ESP_LOGI(TAG, "We think Heatpump is not connected anymore..");
             this->reconnectUART();
@@ -990,7 +990,7 @@ void CN105Climate::reconnectIfConnectionLost() {
 
 
 bool CN105Climate::isHeatpumpConnectionActive() {
-    long lrTimeMs = CUSTOM_MILLIS - this->lastResponseMs;
+    long lrTimeMs = esphome::millis() - this->lastResponseMs;
 
     // if (lrTimeMs > MAX_DELAY_RESPONSE_FACTOR * this->update_interval_) {
     //     ESP_LOGV(TAG, "Heatpump has not replied for %ld s", lrTimeMs / 1000);
@@ -1017,7 +1017,7 @@ void CN105Climate::force_low_level_uart_reinit() {
     // We reconfigure in-place and sanitize the GPIOs
     if (this->tx_pin_ >= 0) gpio_reset_pin((gpio_num_t)this->tx_pin_);
     if (this->rx_pin_ >= 0) gpio_reset_pin((gpio_num_t)this->rx_pin_);
-    CUSTOM_DELAY(2);
+    esphome::delay(2);
 
     // Settings SERIAL_8E1 @ 2400 bauds (values ​​from the UARTComponent config)
     uart_config_t cfg = {};
@@ -1067,7 +1067,7 @@ void CN105Climate::force_low_level_uart_reinit() {
 
     // Purge buffers to avoid residue
     uart_flush_input(port);
-    CUSTOM_DELAY(2);
+    esphome::delay(2);
 
     // Diagnostics
     uint32_t eff_baud = 0;

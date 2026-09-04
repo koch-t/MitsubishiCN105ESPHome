@@ -636,15 +636,15 @@ void CN105Climate::testCase1() {
     ESP_LOGI("testMutex", "verrouillage du mutex...");
     this->esp8266Mutex = true;
     this->testEmulateMutex("testMutex", std::bind(&CN105Climate::logDelegate, this));
-    CUSTOM_DELAY(testDelay);
+    esphome::delay(testDelay);
     ESP_LOGI("testMutex", "Déverrouillage du mutex...");
     this->esp8266Mutex = false;
-    CUSTOM_DELAY(200);
+    esphome::delay(200);
     ESP_LOGI("testMutex", "verrouillage du mutex...");
     this->esp8266Mutex = true;
     this->testEmulateMutex("testMutex", std::bind(&CN105Climate::logDelegate, this));
     ESP_LOGI("testMutex", "blocage de 2,5s...");
-    CUSTOM_DELAY(2500);
+    esphome::delay(2500);
     ESP_LOGI("testMutex", "fin du test");
 
 #endif
